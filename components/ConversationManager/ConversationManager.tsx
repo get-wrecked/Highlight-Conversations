@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchTranscript, fetchMicActivity } from '../../services/audioService';
+import { fetchTranscript, fetchMicActivity, setSegmentStatusCallback } from '../../services/audioService';
 import { ConversationData, mockConversations } from '../../data/conversations';
 import ConversationGrid from '../Card/ConversationGrid';
 import { v4 as uuidv4 } from 'uuid';
@@ -57,11 +57,16 @@ const ConversationsManager: React.FC<ConversationsManagerProps> = ({ onMicActivi
     return () => clearInterval(intervalId);
   }, [pollTranscription]);
 
-  //   console.log("Setting segment status callback inside conversations manager");
-  //   setSegmentStatusCallback((current, total) => {
-  //     console.log("Segments: ", current, total);
-  //   });
-  // }, []);
+  useEffect(() => {
+    console.log("Setting segment status callback inside conversations manager");
+    try {
+      setSegmentStatusCallback((current, total) => {
+        console.log("Segments: ", current, total);
+      });
+    } catch (error) {
+      console.error("Error setting segment status callback:", error);
+    }
+  }, []);
 
   return (
     <ConversationGrid

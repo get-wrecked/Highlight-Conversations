@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ConversationData } from "@/data/conversations";
+import { Button } from "@/components/ui/button";
 
 import {
     Card,
@@ -13,8 +14,6 @@ import {
   interface ConversationCardProps {
     conversation: ConversationData;
   }
-
-import { Button } from "@/components/ui/button";
 
 const ConversationCard: React.FC<ConversationCardProps> = ({ conversation }) => {
   return (

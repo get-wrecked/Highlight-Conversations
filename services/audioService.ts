@@ -29,13 +29,15 @@ export const setSegmentStatusCallback = (callback: (current: number, total: numb
     console.log("Setting segment status callback");
 
     api.addEventListener("onContext", (context: HighlightContext) => {
-      // You should perform some logic here using the context.
       const focusedAppTitle = context.application.focusedWindow.title;
       console.log("Context update:", context);
     });
 
-    api.addEventListener("segment-status-update", (event) => {
+    api.addEventListener("segmentStatusUpdate", (event) => {
       console.log("Segment status update:", event);
+      if (event && typeof event.current === 'number' && typeof event.total === 'number') {
+        callback(event.current, event.total);
+      }
     });
   } catch (error) {
     console.error("Failed to set segment status callback:", error);
