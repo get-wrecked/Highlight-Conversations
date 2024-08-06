@@ -20,6 +20,51 @@ interface ConversationsManagerProps {
   searchQuery: string;
 }
 
+interface TranscriptSegment {
+  timestamp: string;
+  speaker: string;
+  text: string;
+}
+
+function parseTranscript(transcript: string): TranscriptSegment[] {
+  return transcript.split('\n').map(line => {
+    const [timestamp, rest] = line.split(' - ');
+    const [speaker, text] = rest.split(': ');
+    return { timestamp, speaker, text };
+  });
+}
+
+function deduplicateAndMergeTranscripts(newSegments: TranscriptSegment[], existingSegments: TranscriptSegment[]): TranscriptSegment[] {
+  const allSegments = [...existingSegments, ...newSegments];
+  const mergedSegments: TranscriptSegment[] = [];
+
+  for (const segment of allSegments) {
+    if (mergedSegments.length === 0) {
+      mergedSegments.push(segment);
+      continue;
+    }
+
+    const lastSegment = mergedSegments[mergedSegments.length - 1];
+    if (lastSegment.speaker === segment.speaker) {
+      // If the speakers are the same, merge the text
+      const combinedText = `${lastSegment.text} ${segment.text}`;
+      const uniqueSentences = Array.from(new Set(combinedText.split('.')))
+        .filter(sentence => sentence.trim().length > 0)
+        .join('. ');
+      
+      mergedSegments[mergedSegments.length - 1] = {
+        ...lastSegment,
+        text: uniqueSentences + '.',
+      };
+    } else {
+      // If the speakers are different, add as a new segment
+      mergedSegments.push(segment);
+    }
+  }
+
+  return mergedSegments;
+}
+
 const ConversationsManager: React.FC<ConversationsManagerProps> = ({
   idleThreshold,
   conversations,
@@ -34,7 +79,6 @@ const ConversationsManager: React.FC<ConversationsManagerProps> = ({
   const [currentConversationParts, setCurrentConversationParts] = useState<string[]>([])
   const [micActivity, setMicActivity] = useState(0)
   const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [nextTranscriptIn, setNextTranscriptIn] = useState(Math.round(INITIAL_POLL_INTERVAL / 1000))
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastActivityTimeRef = useRef(Date.now())
   const lastTranscriptTimeRef = useRef<number>(Date.now())
@@ -42,6 +86,9 @@ const ConversationsManager: React.FC<ConversationsManagerProps> = ({
   const initialPollIntervalRef = useRef(INITIAL_POLL_INTERVAL)
   const maxPollIntervalRef = useRef(MAX_POLL_INTERVAL)
   const isPollingRef = useRef(false)
+  const [lastProcessedTimestamp, setLastProcessedTimestamp] = useState(Date.now());
+  const [processedSegments, setProcessedSegments] = useState<TranscriptSegment[]>([]);
+
 
   // Function to get the current conversation as a string
   const getCurrentConversationString = useCallback((reversed: boolean = true) => {
@@ -102,41 +149,84 @@ const ConversationsManager: React.FC<ConversationsManagerProps> = ({
   }, [saveCurrentConversation, currentConversationParts])
 
   // Poll Highlight api for transcripts
+  // const pollTranscription = useCallback(async () => {
+  //   if (isSleeping || !isAudioEnabled || isPollingRef.current) {
+  //     return;
+  //   }
+
+  //   isPollingRef.current = true;
+  //   const currentTime = Date.now();
+  //   const timeSinceLastTranscript = (currentTime - lastTranscriptTimeRef.current) / 1000;
+    
+  //   try {
+  //     const transcript = await fetchTranscript()
+  //     if (transcript) {
+  //       console.log(`[${new Date().toISOString()}] Received transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, transcript)
+  //       setCurrentConversationParts(prevParts => {
+  //         if (transcript.trim() && (prevParts.length === 0 || transcript.trim() !== prevParts[0])) {
+  //           setPollInterval(prev => Math.min(prev * 1.5, maxPollIntervalRef.current))
+  //           return [transcript.trim(), ...prevParts]
+  //         }
+  //         return prevParts
+  //       })
+  //       lastActivityTimeRef.current = currentTime
+  //       lastTranscriptTimeRef.current = currentTime
+  //     } else {
+  //       console.log(`[${new Date().toISOString()}] No new transcript received. Time since last transcript: ${timeSinceLastTranscript.toFixed(2)} seconds`)
+  //       setPollInterval(prev => Math.max(prev / 1.2, initialPollIntervalRef.current))
+  //     }
+  //   } catch (error) {
+  //     console.error(`[${new Date().toISOString()}] Error fetching transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, error)
+  //     setPollInterval(prev => Math.max(prev / 1.1, initialPollIntervalRef.current))
+  //   } finally {
+  //     isPollingRef.current = false;
+  //   }
+  // }, [isSleeping, isAudioEnabled])
   const pollTranscription = useCallback(async () => {
     if (isSleeping || !isAudioEnabled || isPollingRef.current) {
       return;
     }
-
+  
     isPollingRef.current = true;
     const currentTime = Date.now();
     const timeSinceLastTranscript = (currentTime - lastTranscriptTimeRef.current) / 1000;
     
     try {
-      const transcript = await fetchTranscript()
+      // Use the long audio version (2 hours)
+      const transcript = await fetchTranscript() // 2 hours in seconds
       if (transcript) {
-        console.log(`[${new Date().toISOString()}] Received transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, transcript)
-        setCurrentConversationParts(prevParts => {
-          if (transcript.trim() && (prevParts.length === 0 || transcript.trim() !== prevParts[0])) {
-            setPollInterval(prev => Math.min(prev * 1.5, maxPollIntervalRef.current))
-            return [transcript.trim(), ...prevParts]
-          }
-          return prevParts
-        })
-        lastActivityTimeRef.current = currentTime
-        lastTranscriptTimeRef.current = currentTime
+        console.log(`[${new Date().toISOString()}] Received transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, transcript);
+        
+        // Parse the transcript into segments
+        const newSegments = parseTranscript(transcript);
+  
+        // Deduplicate and merge the new segments with existing ones
+        const mergedSegments = deduplicateAndMergeTranscripts(newSegments, processedSegments);
+  
+        if (mergedSegments.length > processedSegments.length) {
+          setProcessedSegments(mergedSegments);
+          
+          // Update the conversation parts
+          setCurrentConversationParts(mergedSegments.map(segment => `${segment.speaker}: ${segment.text}`));
+  
+          lastActivityTimeRef.current = currentTime;
+          lastTranscriptTimeRef.current = currentTime;
+          setPollInterval(prev => Math.min(prev * 1.5, maxPollIntervalRef.current));
+        } else {
+          console.log(`[${new Date().toISOString()}] No new unique transcript data.`);
+          setPollInterval(prev => Math.max(prev / 1.2, initialPollIntervalRef.current));
+        }
       } else {
-        console.log(`[${new Date().toISOString()}] No new transcript received. Time since last transcript: ${timeSinceLastTranscript.toFixed(2)} seconds`)
-        setPollInterval(prev => Math.max(prev / 1.2, initialPollIntervalRef.current))
+        console.log(`[${new Date().toISOString()}] No transcript received. Time since last transcript: ${timeSinceLastTranscript.toFixed(2)} seconds`);
+        setPollInterval(prev => Math.max(prev / 1.2, initialPollIntervalRef.current));
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error fetching transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, error)
-      setPollInterval(prev => Math.max(prev / 1.1, initialPollIntervalRef.current))
+      console.error(`[${new Date().toISOString()}] Error fetching transcript after ${timeSinceLastTranscript.toFixed(2)} seconds:`, error);
+      setPollInterval(prev => Math.max(prev / 1.1, initialPollIntervalRef.current));
     } finally {
       isPollingRef.current = false;
-      // Round the pollInterval to the nearest second (1000ms)
-      setNextTranscriptIn(Math.round(pollInterval / 1000));
     }
-  }, [isSleeping, isAudioEnabled, pollInterval])
+  }, [isSleeping, isAudioEnabled, processedSegments]);
 
   // Effect for polling mic activity
   useEffect(() => {
@@ -161,31 +251,12 @@ const ConversationsManager: React.FC<ConversationsManagerProps> = ({
     };
   }, [pollTranscription, pollInterval]);
 
-    // Countdown effect
-    useEffect(() => {
-      const updateCountdown = () => {
-        setNextTranscriptIn((prev) => {
-          if (prev <= 0) return INITIAL_POLL_INTERVAL / 1000
-          return prev - 1
-        })
-      }
-  
-      countdownIntervalRef.current = setInterval(updateCountdown, 1000)
-  
-      return () => {
-        if (countdownIntervalRef.current) {
-          clearInterval(countdownIntervalRef.current)
-        }
-      }
-    }, [])
-
   return (
     <ConversationGrid
       currentConversation={getCurrentConversationString()} // Pass reversed (latest on top)
       conversations={conversations}
       micActivity={micActivity}
       isAudioEnabled={isAudioEnabled}
-      nextTranscriptIn={nextTranscriptIn}
       onDeleteConversation={onDeleteConversation}
       onSave={() => handleSave(true)}
       onUpdate={onUpdateConversation}

@@ -36,13 +36,25 @@ declare global {
 }
 
 // Public API functions
-export const fetchTranscript = async (): Promise<string | null> => {
-  return await Highlight.user.getAudio(false)
+export const fetchTranscript = async (): Promise<string> => {
+  try {
+    const response = await Highlight.user.getAudio(true)
+    return response
+  } catch (error) {
+    console.error('Error fetching transcript:', error);
+    return '';
+  }
 }
 
-export const fetchTranscriptForDuration = async (seconds: number): Promise<string | null> => {
-  return await Highlight.user.getAudioForDuration(seconds)
-}
+export const fetchTranscriptForDuration = async (durationInSeconds: number): Promise<string> => {
+  try {
+    const response = await Highlight.user.getAudioForDuration(durationInSeconds);
+    return response;
+  } catch (error) {
+    console.error('Error fetching transcript:', error);
+    return '';
+  }
+};
 
 export const fetchLongTranscript = async (): Promise<string | null> => {
   return await Highlight.user.getAudio(true)
